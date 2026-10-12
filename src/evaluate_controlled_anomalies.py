@@ -119,6 +119,17 @@ def main():
     start_d = 550
     mark_event(start_d, 1, "Event D - simulated sensor fault")
     test.loc[start_d, "water_level"] = 100.0
+    diagnostic_test = test.copy()
+    diagnostic_test["injected_anomaly"] = row_labels
+
+    diagnostic_path = OUTPUT_DIR / "controlled_test_data.csv"
+    diagnostic_test.to_csv(diagnostic_path, index=False)
+
+    print(f"\nSaved controlled test data to: {diagnostic_path}")
+    print(
+        "Injected observations:",
+        int(diagnostic_test["injected_anomaly"].sum()),
+    )
 
     # Scale using the scaler fitted on the original training data.
     scaler = joblib.load(SCALER_PATH)
