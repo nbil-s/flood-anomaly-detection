@@ -1,17 +1,20 @@
 
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import json
 import math
+import traceback
 
 import joblib
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, field_validator
 
 from model import LSTMAutoencoder
+from firebase_db import save_sensor_reading, db
 
 
 # Project paths
@@ -36,8 +39,17 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# In-memory buffer for the latest readings.
-# This is suitable for local testing, not persistent storage.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://127.0.0.1:5500",
+        "http://localhost:5500",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
+
+# In-memory buffer for local testing.
 reading_buffer = deque(maxlen=12)
 
 
@@ -97,6 +109,14 @@ class SensorReading(BaseModel):
     temperature: float = Field(allow_inf_nan=False)
     humidity: float = Field(ge=0, le=100, allow_inf_nan=False)
 
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+
+        return value.astimezone(timezone.utc)
+
 
 @app.get("/")
 def home():
@@ -118,11 +138,83 @@ def health():
     }
 
 
+@app.get("/dashboard-data")
+def get_dashboard_data(limit: int = 20):
+    """Return recent sensor readings and detected anomalies."""
+
+    if limit < 1 or limit > 500:
+        raise HTTPException(
+            status_code=422,
+            detail="Limit must be between 1 and 500.",
+        )
+
+    try:
+        documents = (
+            db.collection("sensor_readings")
+            .order_by("timestamp", direction="DESCENDING")
+            .limit(limit)
+            .stream()
+        )
+
+        readings = []
+
+        for doc in documents:
+            data = doc.to_dict() or {}
+
+            timestamp = data.get("timestamp")
+            if isinstance(timestamp, datetime):
+                timestamp = timestamp.isoformat()
+
+            detection = data.get("detection")
+
+            readings.append({
+                "id": doc.id,
+                "timestamp": timestamp,
+                "water_level": data.get("water_level"),
+                "rainfall": data.get("rainfall"),
+                "temperature": data.get("temperature"),
+                "humidity": data.get("humidity"),
+                "data_source": data.get("data_source"),
+                "detection": detection,
+            })
+
+        # Chronological order for dashboard charts.
+        readings.reverse()
+
+        anomaly_events = [
+            reading
+            for reading in readings
+            if isinstance(reading.get("detection"), dict)
+            and reading["detection"].get("anomaly_detected") is True
+        ]
+
+        latest_reading = readings[-1] if readings else None
+
+        return {
+            "readings": readings,
+            "latest_reading": latest_reading,
+            "anomaly_events": anomaly_events,
+            "count": len(readings),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as exc:
+        print(
+            f"Dashboard data error: {type(exc).__name__}: {exc}"
+        )
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not load dashboard data. Check the API terminal logs.",
+        ) from exc
+
+
 @app.post("/readings")
 def receive_reading(reading: SensorReading):
     values = reading.model_dump()
-
-    # Convert sensor features into the model's expected order.
     feature_values = [values[name] for name in FEATURES]
 
     if not all(math.isfinite(value) for value in feature_values):
@@ -131,18 +223,39 @@ def receive_reading(reading: SensorReading):
             detail="All sensor readings must be finite numbers.",
         )
 
-    # Keep readings in chronological order.
+    # Ensure readings arrive in chronological order.
     if reading_buffer and reading.timestamp <= reading_buffer[-1]["timestamp"]:
         raise HTTPException(
             status_code=400,
             detail="Timestamp must be later than the previous reading.",
         )
 
+    # Save the reading to Firebase.
+    try:
+        sensor_doc_ref = save_sensor_reading({
+            "timestamp": reading.timestamp.isoformat(),
+            "water_level": values["water_level"],
+            "rainfall": values["rainfall"],
+            "temperature": values["temperature"],
+            "humidity": values["humidity"],
+            "data_source": "submitted_sensor_reading",
+        })
+    except Exception as exc:
+        print(f"Firebase save error: {type(exc).__name__}: {exc}")
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not save the sensor reading to Firebase.",
+        ) from exc
+
+    # Add each successfully saved reading once.
     reading_buffer.append({
         "timestamp": reading.timestamp,
         "features": feature_values,
     })
 
+    # Collect 12 readings before running detection.
     if len(reading_buffer) < 12:
         return {
             "status": "collecting",
@@ -150,13 +263,14 @@ def receive_reading(reading: SensorReading):
             "readings_received": len(reading_buffer),
             "readings_required": 12,
             "anomaly_detected": None,
+            "firebase_saved": True,
         }
 
+    # Prepare the sequence for the LSTM autoencoder.
     sequence = np.array(
         [item["features"] for item in reading_buffer],
         dtype=np.float32,
     )
-
     scaled_sequence = scaler.transform(sequence)
 
     input_tensor = torch.tensor(
@@ -172,8 +286,10 @@ def receive_reading(reading: SensorReading):
 
     anomaly_detected = reconstruction_error > threshold
 
-    return {
-        "status": "anomaly_detected" if anomaly_detected else "normal",
+    detection_result = {
+        "status": (
+            "anomaly_detected" if anomaly_detected else "normal"
+        ),
         "timestamp": reading.timestamp.isoformat(),
         "reconstruction_error": round(reconstruction_error, 6),
         "threshold": round(threshold, 6),
@@ -184,4 +300,18 @@ def receive_reading(reading: SensorReading):
             else "No anomaly detected by the current model."
         ),
         "data_source": "submitted_sensor_reading",
+        "firebase_saved": True,
     }
+
+    # Save the detection result to the latest reading's document.
+    try:
+        sensor_doc_ref.update({"detection": detection_result})
+        detection_result["firebase_detection_saved"] = True
+    except Exception as exc:
+        print(
+            f"Firebase detection update error: {type(exc).__name__}: {exc}"
+        )
+        traceback.print_exc()
+        detection_result["firebase_detection_saved"] = False
+
+    return detection_result

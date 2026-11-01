@@ -1,0 +1,411 @@
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#101b2b">
+    <title>FloodWatch | Environmental Monitoring</title>
+
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script type="module" src="app.js"></script>
+</head>
+<body>
+
+    <!-- Login view, available if authentication is enabled -->
+    <section id="loginView" class="login-view hidden">
+        <div class="login-card">
+            <div class="login-brand-icon">FW</div>
+            <p class="eyebrow">ENVIRONMENTAL INTELLIGENCE</p>
+            <h1>FloodWatch</h1>
+            <p>Flood anomaly monitoring system</p>
+
+            <button
+                id="googleSignInButton"
+                class="button button-primary"
+                type="button">
+                Sign in with Google
+            </button>
+
+            <p id="loginMessage" class="login-message" role="status"></p>
+        </div>
+    </section>
+
+    <div id="dashboardView" class="dashboard-shell">
+
+        <!-- LEFT SIDEBAR -->
+        <aside class="sidebar">
+
+            <a class="brand" href="#overview" aria-label="FloodWatch home">
+                <div class="brand-icon">FW</div>
+                <div class="brand-copy">
+                    <h1>FloodWatch</h1>
+                    <p>Environmental intelligence</p>
+                </div>
+            </a>
+
+            <div class="sidebar-label">WORKSPACE</div>
+
+            <nav class="sidebar-nav" aria-label="Main navigation">
+                <a class="nav-link active" href="#overview">
+                    <span class="nav-icon" aria-hidden="true">▦</span>
+                    <span>Overview</span>
+                </a>
+
+                <a class="nav-link" href="#sensor-history">
+                    <span class="nav-icon" aria-hidden="true">⌁</span>
+                    <span>Sensor history</span>
+                </a>
+
+                <a class="nav-link" href="#detection">
+                    <span class="nav-icon" aria-hidden="true">◎</span>
+                    <span>Anomaly detection</span>
+                </a>
+
+                <a class="nav-link" href="#recent-readings">
+                    <span class="nav-icon" aria-hidden="true">≡</span>
+                    <span>Recent readings</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-note">
+                <span class="sidebar-note-indicator"></span>
+                <div>
+                    <strong>Monitoring active</strong>
+                    <p>Backend data refreshes periodically</p>
+                </div>
+            </div>
+
+            <!-- VIEWER PROFILE -->
+            <div class="sidebar-bottom">
+                <div class="sidebar-label">VIEWER PROFILE</div>
+
+                <div class="profile-card">
+                    <img
+                        id="profilePhoto"
+                        class="profile-photo hidden"
+                        alt="Profile photo">
+
+                    <div
+                        id="profileInitials"
+                        class="profile-initials"
+                        aria-hidden="true">
+                        DV
+                    </div>
+
+                    <div class="profile-details">
+                        <strong id="profileName">Demo Viewer</strong>
+                        <span id="profileEmail">Local demonstration</span>
+                    </div>
+                </div>
+
+                <button
+                    id="signOutButton"
+                    class="sidebar-signout"
+                    type="button">
+                    <span aria-hidden="true">↪</span>
+                    <span>Sign out</span>
+                </button>
+            </div>
+
+        </aside>
+
+        <!-- MAIN DASHBOARD -->
+        <div class="dashboard-content">
+
+            <header class="topbar">
+                <div class="topbar-title">
+                    <p class="eyebrow">FLOOD MONITORING SYSTEM</p>
+                    <h2>Monitoring overview</h2>
+                </div>
+
+                <div class="header-actions">
+
+                    <div class="connection" aria-live="polite">
+                        <span id="connectionDot" class="dot connecting"></span>
+                        <span id="connectionStatus">Connecting...</span>
+                    </div>
+
+                    <label class="theme-control" for="themeSelect">
+                        <span aria-hidden="true">◐</span>
+
+                        <select id="themeSelect" aria-label="Choose colour theme">
+                            <option value="light">Light mode</option>
+                            <option value="dark">Dark mode</option>
+                            <option value="system">System</option>
+                        </select>
+                    </label>
+
+                    <button
+                        id="refreshButton"
+                        class="button button-primary"
+                        type="button">
+                        <span aria-hidden="true">↻</span>
+                        Refresh data
+                    </button>
+
+                </div>
+            </header>
+
+            <main id="overview" class="container">
+
+                <!-- PAGE INTRODUCTION -->
+                <section class="page-heading">
+                    <div>
+                        <p class="eyebrow">LIVE ENVIRONMENTAL DATA</p>
+                        <h2>Sensor overview</h2>
+
+                        <p class="muted">
+                            Review current measurements and the latest model analysis.
+                        </p>
+
+                        <p id="signedInUser" class="viewer-context">
+                            Local demonstration — FastAPI backend data
+                        </p>
+                    </div>
+
+                    <div class="updated-chip">
+                        <span class="updated-chip-dot"></span>
+                        <span id="lastUpdated">Waiting for first refresh</span>
+                    </div>
+                </section>
+
+                <!-- ANOMALY ALERT -->
+                <section
+                    id="alertBanner"
+                    class="alert-banner hidden"
+                    role="status"
+                    aria-live="polite">
+
+                    <div class="alert-icon" aria-hidden="true">!</div>
+
+                    <div>
+                        <strong id="alertTitle">
+                            Potential flood-related anomaly
+                        </strong>
+                        <p id="alertMessage"></p>
+                    </div>
+
+                </section>
+
+                <!-- SENSOR SUMMARY CARDS -->
+                <section
+                    class="metrics-grid"
+                    aria-label="Latest sensor measurements">
+
+                    <article class="metric-card metric-water">
+                        <div class="metric-heading">
+                            <span>Water level</span>
+                            <span class="metric-symbol" aria-hidden="true">WL</span>
+                        </div>
+
+                        <p id="waterLevel" class="metric-value">--</p>
+                        <p class="metric-unit">Sensor measurement</p>
+
+                        <div class="metric-card-footer">
+                            <span class="metric-indicator"></span>
+                            Latest reading
+                        </div>
+                    </article>
+
+                    <article class="metric-card metric-rain">
+                        <div class="metric-heading">
+                            <span>Rainfall</span>
+                            <span class="metric-symbol" aria-hidden="true">RF</span>
+                        </div>
+
+                        <p id="rainfall" class="metric-value">--</p>
+                        <p class="metric-unit">Sensor measurement</p>
+
+                        <div class="metric-card-footer">
+                            <span class="metric-indicator"></span>
+                            Latest reading
+                        </div>
+                    </article>
+
+                    <article class="metric-card metric-temp">
+                        <div class="metric-heading">
+                            <span>Temperature</span>
+                            <span class="metric-symbol" aria-hidden="true">TP</span>
+                        </div>
+
+                        <p id="temperature" class="metric-value">--</p>
+                        <p class="metric-unit">°C</p>
+
+                        <div class="metric-card-footer">
+                            <span class="metric-indicator"></span>
+                            Latest reading
+                        </div>
+                    </article>
+
+                    <article class="metric-card metric-humidity">
+                        <div class="metric-heading">
+                            <span>Humidity</span>
+                            <span class="metric-symbol" aria-hidden="true">HM</span>
+                        </div>
+
+                        <p id="humidity" class="metric-value">--</p>
+                        <p class="metric-unit">%</p>
+
+                        <div class="metric-card-footer">
+                            <span class="metric-indicator"></span>
+                            Latest reading
+                        </div>
+                    </article>
+
+                </section>
+
+                <!-- DETECTION AND WATER-LEVEL CHART -->
+                <section id="detection" class="overview-grid">
+
+                    <article class="panel status-panel">
+                        <div class="panel-heading">
+                            <div>
+                                <p class="section-kicker">MODEL OUTPUT</p>
+                                <h3>Detection status</h3>
+                                <p class="muted">
+                                    Latest completed LSTM autoencoder analysis
+                                </p>
+                            </div>
+
+                            <span class="panel-icon" aria-hidden="true">◎</span>
+                        </div>
+
+                        <div
+                            id="detectionBadge"
+                            class="status-badge status-pending">
+                            Awaiting analysis
+                        </div>
+
+                        <p id="detectionDescription" class="status-description">
+                            Waiting for a completed model analysis.
+                        </p>
+
+                        <div class="detail-row">
+                            <span>Reconstruction error</span>
+                            <strong id="reconstructionError">--</strong>
+                        </div>
+
+                        <div class="detail-row">
+                            <span>Model threshold</span>
+                            <strong id="modelThreshold">--</strong>
+                        </div>
+
+                        <div class="detail-row">
+                            <span>Readings retrieved</span>
+                            <strong id="readingCount">0</strong>
+                        </div>
+
+                        <p class="model-disclaimer">
+                            An anomaly is an unusual sensor pattern, not confirmation
+                            of a flood event.
+                        </p>
+                    </article>
+
+                    <article id="sensor-history" class="panel chart-panel">
+                        <div class="panel-heading">
+                            <div>
+                                <p class="section-kicker">WATER SENSOR</p>
+                                <h3>Water-level history</h3>
+                                <p class="muted">
+                                    Recent measurements returned by the backend
+                                </p>
+                            </div>
+
+                            <span class="chart-legend-note">Historical trend</span>
+                        </div>
+
+                        <div class="chart-container">
+                            <canvas
+                                id="waterChart"
+                                aria-label="Water-level history chart"
+                                role="img">
+                            </canvas>
+                        </div>
+                    </article>
+
+                </section>
+
+                <!-- ENVIRONMENTAL CHART -->
+                <section class="panel chart-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="section-kicker">ENVIRONMENT SENSORS</p>
+                            <h3>Environmental readings</h3>
+                            <p class="muted">
+                                Rainfall, temperature and humidity over time
+                            </p>
+                        </div>
+
+                        <span class="chart-legend-note">Recent history</span>
+                    </div>
+
+                    <div class="chart-container secondary-chart">
+                        <canvas
+                            id="environmentChart"
+                            aria-label="Environmental readings chart"
+                            role="img">
+                        </canvas>
+                    </div>
+                </section>
+
+                <!-- RECENT READINGS TABLE -->
+                <section id="recent-readings" class="panel readings-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="section-kicker">RECORDS</p>
+                            <h3>Recent sensor readings</h3>
+                            <p class="muted">
+                                Latest records retrieved from the backend
+                            </p>
+                        </div>
+
+                        <span class="record-count">
+                            <span id="tableRecordCount">0</span> shown
+                        </span>
+                    </div>
+
+                    <div class="table-wrapper">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Timestamp</th>
+                                    <th>Water level</th>
+                                    <th>Rainfall</th>
+                                    <th>Temperature</th>
+                                    <th>Humidity</th>
+                                    <th>Detection</th>
+                                </tr>
+                            </thead>
+
+                            <tbody id="readingsTable">
+                                <tr>
+                                    <td colspan="6" class="empty-cell">
+                                        Loading sensor readings...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <p class="table-note">
+                        The model analyses a sequence of 12 readings. A detection
+                        result may only be stored on the final reading of the
+                        analysed sequence.
+                    </p>
+                </section>
+
+                <!-- FOOTER -->
+                <footer class="dashboard-footer">
+                    <span>FloodWatch Monitoring System</span>
+                    <span>LSTM autoencoder · FastAPI · Firebase / Firestore</span>
+                </footer>
+
+            </main>
+        </div>
+    </div>
+
+</body>
+</html>
+```

@@ -22,10 +22,12 @@ db = get_firestore_client()
 
 
 def save_sensor_reading(reading, detection=None):
-    """Save a sensor reading and optional detection result to Firestore."""
+    """Save a sensor reading and return its Firestore document reference."""
     document = dict(reading)
 
-    if detection:
+    if detection is not None:
         document["detection"] = dict(detection)
 
-    db.collection("sensor_readings").add(document)
+    _, doc_ref = db.collection("sensor_readings").add(document)
+    return doc_ref
+
