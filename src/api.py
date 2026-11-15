@@ -1,6 +1,5 @@
 
 from collections import deque
-from datetime import datetime, timezone
 from pathlib import Path
 import json
 import math
@@ -9,12 +8,18 @@ import traceback
 import joblib
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from firebase_admin import auth as firebase_auth
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
 from model import LSTMAutoencoder
 from firebase_db import save_sensor_reading, db
+
+from notifications import send_anomaly_email
+from datetime import datetime, timezone, timedelta
 
 
 # Project paths
@@ -50,7 +55,46 @@ app.add_middleware(
 )
 
 # In-memory buffer for local testing.
-reading_buffer = deque(maxlen=12)
+reading_buffer = None
+
+# Prevent repeated email alerts for a continuing anomaly.
+last_email_alert_at = None
+EMAIL_ALERT_COOLDOWN = 30  # minutes
+
+# Firebase authentication
+bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def require_firebase_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+):
+    """
+    Verify the Firebase ID token supplied by the dashboard.
+    Reject requests without a valid token.
+    """
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Please sign in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        decoded_token = firebase_auth.verify_id_token(
+            credentials.credentials
+        )
+
+        return decoded_token
+
+    except Exception as exc:
+        print(f"Firebase authentication error: {type(exc).__name__}: {exc}")
+
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
 
 
 def load_artifacts():
@@ -73,11 +117,21 @@ def load_artifacts():
     with THRESHOLD_PATH.open("r", encoding="utf-8") as file:
         threshold_config = json.load(file)
 
-    if threshold_config.get("sequence_length") != 12:
-        raise RuntimeError("Expected a sequence length of 12.")
+    sequence_length = config.get("sequence_length")
+
+    if not isinstance(sequence_length, int) or sequence_length <= 0:
+        raise RuntimeError("Invalid sequence length in model configuration.")
+
+    if threshold_config.get("sequence_length") != sequence_length:
+        raise RuntimeError(
+            "The model and threshold configurations have different sequence lengths."
+        )
+
+    if config.get("input_features") != len(FEATURES):
+        raise RuntimeError("Expected exactly four model input features.")
 
     if threshold_config.get("features") != len(FEATURES):
-        raise RuntimeError("Expected exactly four input features.")
+        raise RuntimeError("Expected exactly four threshold features.")
 
     model = LSTMAutoencoder(
         input_features=config["input_features"],
@@ -96,10 +150,12 @@ def load_artifacts():
     scaler = joblib.load(SCALER_PATH)
     threshold = float(threshold_config["threshold"])
 
-    return model, scaler, threshold
+    return model, scaler, threshold, sequence_length
 
 
-model, scaler, threshold = load_artifacts()
+model, scaler, threshold, sequence_length = load_artifacts()
+
+reading_buffer = deque(maxlen=sequence_length)
 
 
 class SensorReading(BaseModel):
@@ -123,7 +179,7 @@ def home():
     return {
         "message": "Flood Anomaly Detection API is running.",
         "model": "LSTM Autoencoder",
-        "sequence_length": 12,
+        "sequence_length": sequence_length,
         "threshold": threshold,
     }
 
@@ -134,12 +190,15 @@ def health():
         "status": "ok",
         "model_loaded": True,
         "buffered_readings": len(reading_buffer),
-        "readings_required": 12,
+        "readings_required": sequence_length,
     }
 
 
 @app.get("/dashboard-data")
-def get_dashboard_data(limit: int = 20):
+def get_dashboard_data(
+    limit: int = 20,
+    current_user: dict = Depends(require_firebase_user),
+):
     """Return recent sensor readings and detected anomalies."""
 
     if limit < 1 or limit > 500:
@@ -214,6 +273,8 @@ def get_dashboard_data(limit: int = 20):
 
 @app.post("/readings")
 def receive_reading(reading: SensorReading):
+    global last_email_alert_at
+
     values = reading.model_dump()
     feature_values = [values[name] for name in FEATURES]
 
@@ -255,13 +316,14 @@ def receive_reading(reading: SensorReading):
         "features": feature_values,
     })
 
-    # Collect 12 readings before running detection.
-    if len(reading_buffer) < 12:
+
+    # Collect the required number of readings before running detection.
+    if len(reading_buffer) < sequence_length:
         return {
             "status": "collecting",
-            "message": "Waiting for a complete 12-reading sequence.",
+            "message": f"Waiting for a complete {sequence_length}-reading sequence.",
             "readings_received": len(reading_buffer),
-            "readings_required": 12,
+            "readings_required": sequence_length,
             "anomaly_detected": None,
             "firebase_saved": True,
         }
@@ -305,8 +367,52 @@ def receive_reading(reading: SensorReading):
 
     # Save the detection result to the latest reading's document.
     try:
-        sensor_doc_ref.update({"detection": detection_result})
+        sensor_doc_ref.update({
+            "detection": detection_result
+        })
         detection_result["firebase_detection_saved"] = True
+
+    except Exception as exc:
+        print(
+            f"Firebase detection update error: {type(exc).__name__}: {exc}"
+        )
+        traceback.print_exc()
+        detection_result["firebase_detection_saved"] = False
+        
+    # Send an email if an anomaly is detected and the cooldown has expired.
+
+    notification_sent = False
+
+    if anomaly_detected:
+        now = datetime.now(timezone.utc)
+
+        cooldown_expired = (
+            last_email_alert_at is None
+            or now - last_email_alert_at
+            >= timedelta(minutes=EMAIL_ALERT_COOLDOWN)
+        )
+
+        if cooldown_expired:
+            notification_sent = send_anomaly_email(
+                timestamp=reading.timestamp.isoformat(),
+                water_level=values["water_level"],
+                rainfall=values["rainfall"],
+                reconstruction_error=round(reconstruction_error, 6),
+                threshold=round(threshold, 6),
+            )
+
+            if notification_sent:
+                last_email_alert_at = now
+
+    detection_result["notification_sent"] = notification_sent
+
+    # Save detection and notification results to Firebase.
+    try:
+        sensor_doc_ref.update({
+            "detection": detection_result
+        })
+        detection_result["firebase_detection_saved"] = True
+    
     except Exception as exc:
         print(
             f"Firebase detection update error: {type(exc).__name__}: {exc}"

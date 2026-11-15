@@ -19,7 +19,7 @@ FEATURES = [
     "humidity",
 ]
 
-WINDOW_SIZE = 12
+WINDOW_SIZE = 24
 
 # Chronological split: 70% train, 15% validation, 15% test
 TRAIN_RATIO = 0.70
@@ -72,7 +72,7 @@ def main():
     # This prototype expects a regular five-minute interval.
     intervals = df["timestamp"].diff().dropna()
 
-    expected_interval = pd.Timedelta(minutes=5)
+    expected_interval = pd.Timedelta(seconds=30)
 
     if not (intervals == expected_interval).all():
         raise ValueError(
@@ -139,7 +139,10 @@ def main():
     print(f"X_test:       {X_test.shape}")
 
     print("\nFeatures:", FEATURES)
-    print("Window duration: 60 minutes")
+    print(
+    f"Window duration: "
+    f"{(WINDOW_SIZE - 1) * 30 / 60:.1f} minutes "
+    f"between first and last readings")
     print("Scaler saved to:", MODEL_DIR / "scaler.joblib")
     print("Processed data saved to:", PROCESSED_DIR)
 

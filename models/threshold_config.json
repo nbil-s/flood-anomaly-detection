@@ -1,8 +1,8 @@
 {
     "method": "validation_error_percentile",
     "percentile": 95,
-    "threshold": 0.6735252737998962,
-    "validation_window_count": 739,
-    "sequence_length": 12,
+    "threshold": 0.18307368457317352,
+    "validation_window_count": 727,
+    "sequence_length": 24,
     "features": 4
 }

@@ -23,6 +23,7 @@ BATCH_SIZE = 64
 EPOCHS = 50
 LEARNING_RATE = 0.001
 PATIENCE = 7
+SEQUENCE_LENGTH = 24
 
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -166,7 +167,7 @@ def main():
         "input_features": 4,
         "hidden_size": 32,
         "latent_size": 16,
-        "sequence_length": 12,
+        "sequence_length":  SEQUENCE_LENGTH,
         "batch_size": BATCH_SIZE,
         "learning_rate": LEARNING_RATE,
         "max_epochs": EPOCHS,

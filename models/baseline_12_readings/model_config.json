@@ -1,0 +1,12 @@
+{
+    "input_features": 4,
+    "hidden_size": 32,
+    "latent_size": 16,
+    "sequence_length": 12,
+    "batch_size": 64,
+    "learning_rate": 0.001,
+    "max_epochs": 50,
+    "best_epoch": 49,
+    "best_validation_loss": 0.19834840854224076,
+    "training_device": "cpu"
+}
