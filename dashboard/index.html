@@ -8,29 +8,92 @@
     <title>FloodWatch | Environmental Monitoring</title>
 
     <link rel="stylesheet" href="style.css">
+    <link
+    rel="stylesheet"
+    href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css"
+>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script type="module" src="app.js"></script>
 </head>
 <body>
 
     <!-- Login view, available if authentication is enabled -->
-    <section id="loginView" class="login-view hidden">
-        <div class="login-card">
-            <div class="login-brand-icon">FW</div>
-            <p class="eyebrow">ENVIRONMENTAL INTELLIGENCE</p>
-            <h1>FloodWatch</h1>
-            <p>Flood anomaly monitoring system</p>
+    <section id="loginView" class="login-view">
 
-            <button
-                id="googleSignInButton"
-                class="button button-primary"
-                type="button">
-                Sign in with Google
+    <div class="login-card">
+
+        <div class="login-brand">
+            <div class="brand-icon">
+                <i class="fas fa-water"></i>
+            </div>
+            <h1>Flood<span>Sense</span></h1>
+            <p>Real-Time Flood Monitoring System</p>
+        </div>
+
+        <div class="login-heading">
+            <h2>Welcome back</h2>
+            <p>Sign in to monitor environmental conditions and detect unusual patterns.</p>
+        </div>
+
+        <!-- Keep your existing Google sign-in button here -->
+        <button type="button" id="googleSignInButton"
+                class="google-login-btn">
+            <i class="fab fa-google"></i>
+            Continue with Google
+        </button>
+
+        <div class="login-divider">
+            <span>OR CONTINUE WITH EMAIL</span>
+        </div>
+
+        <div class="email-login">
+
+            <label for="emailInput">Email address</label>
+
+            <input
+                type="email"
+                id="emailInput"
+                placeholder="name@example.com"
+                autocomplete="email"
+            >
+
+            <button type="button" id="emailSignInButton"
+                    class="email-login-btn">
+                Continue with Email
+                <i class="fas fa-arrow-right"></i>
             </button>
 
-            <p id="loginMessage" class="login-message" role="status"></p>
+            <p id="emailLoginMessage"
+               role="status"
+               aria-live="polite"></p>
+
+            <div id="emailConfirmSection" class="hidden">
+                <label for="emailConfirmInput">
+                    Confirm your email address
+                </label>
+
+                <input
+                    type="email"
+                    id="emailConfirmInput"
+                    placeholder="Enter your email address"
+                    autocomplete="email"
+                >
+
+                <button type="button" id="completeEmailSignInButton"
+                        class="email-login-btn">
+                    Verify and sign in
+                </button>
+            </div>
         </div>
-    </section>
+
+        <div class="login-footer">
+            <i class="fas fa-shield-alt"></i>
+            Secure authentication powered by Firebase
+        </div>
+
+    </div>
+
+</section>
 
     <div id="dashboardView" class="dashboard-shell">
 
@@ -40,7 +103,7 @@
             <a class="brand" href="#overview" aria-label="FloodWatch home">
                 <div class="brand-icon">FW</div>
                 <div class="brand-copy">
-                    <h1>FloodWatch</h1>
+                    <h1>FloodSense</h1>
                     <p>Environmental intelligence</p>
                 </div>
             </a>
@@ -398,7 +461,7 @@
 
                 <!-- FOOTER -->
                 <footer class="dashboard-footer">
-                    <span>FloodWatch Monitoring System</span>
+                    <span>FloodSense Monitoring System</span>
                     <span>LSTM autoencoder · FastAPI · Firebase / Firestore</span>
                 </footer>
 
