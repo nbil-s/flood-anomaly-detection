@@ -25,3 +25,28 @@ Thumbs.db
 
 # Temporary files
 *.log
+
+# Generated experimental datasets
+experiments/*/data/raw/
+experiments/*/data/processed/
+experiments/*/models/
+experiments/*/results/
+
+# Generated seed-testing datasets
+experiments/seed_testing/seed_*/
+
+# Generated model artifacts
+*.pth
+*.joblib
+*.npy
+
+# Temporary backups
+*-backup.*
+*backup*.js
+*_backup.py
+
+# Generated historical analysis images
+results/historical_water_level_2024.png
+results/sambir_extreme_events_2024.png
+
+data/historical/
