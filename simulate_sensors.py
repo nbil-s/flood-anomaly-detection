@@ -165,10 +165,24 @@ def main():
     print(f"Sampling interval: {SAMPLING_INTERVAL_SECONDS} seconds")
     print(f"Request delay: {args.delay} seconds")
     print("\nSending readings...\n")
+    
+    simulation_start = (
+    pd.Timestamp.now(tz="UTC")
+    - pd.Timedelta(
+        seconds=(SEQUENCE_LENGTH - 1) * SAMPLING_INTERVAL_SECONDS
+    )
+)
 
     for index, row in readings.iterrows():
+        reading_timestamp = (
+            simulation_start
+            + pd.Timedelta(
+                seconds=index * SAMPLING_INTERVAL_SECONDS
+            )
+        )
+
         reading = {
-            "timestamp": row["timestamp"].isoformat(),
+            "timestamp": reading_timestamp.isoformat(),
             "water_level": float(row["water_level"]),
             "rainfall": float(row["rainfall"]),
             "temperature": float(row["temperature"]),

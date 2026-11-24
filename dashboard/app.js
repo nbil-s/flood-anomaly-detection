@@ -881,7 +881,7 @@ function createDetectionCell(reading, data) {
         badge.textContent = "Normal";
     } else {
         badge.classList.add("pending");
-        badge.textContent = "Not analysed";
+        badge.textContent = "Included in sequence";
     }
 
     cell.appendChild(badge);
@@ -905,7 +905,7 @@ function updateTable(readings, data) {
         return second - first;
     });
 
-    const visibleReadings = orderedReadings.slice(0, 10);
+    const visibleReadings = orderedReadings.slice(0, 240);
 
     setText("tableRecordCount", visibleReadings.length);
     setText("readingCount", readings.length);
@@ -1023,7 +1023,7 @@ async function loadBackendDashboard() {
         const idToken = await user.getIdToken();
 
         // Send the token to FastAPI for verification.
-        const response = await fetch(API_URL, {
+       const response = await fetch(`${API_URL}?limit=240`, {
             method: "GET",
             headers: {
                 "Accept": "application/json",

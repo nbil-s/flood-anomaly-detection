@@ -239,7 +239,7 @@ def health():
 
 @app.get("/dashboard-data")
 def get_dashboard_data(
-    limit: int = 20,
+    limit: int = 240,
     current_user: dict = Depends(require_firebase_user),
 ):
     """Return recent sensor readings and detected anomalies."""
@@ -253,7 +253,7 @@ def get_dashboard_data(
     try:
         documents = (
             db.collection("sensor_readings")
-            .order_by("timestamp", direction="DESCENDING")
+            .order_by("received_at", direction="DESCENDING")
             .limit(limit)
             .stream()
         )
