@@ -20,15 +20,11 @@ const googleProvider = new GoogleAuthProvider();
 
 /* =========================================================
    FLOODWATCH — DASHBOARD APPLICATION
-   Connects the dashboard to the existing FastAPI backend.
-   The existing LSTM model remains on the backend.
    ========================================================= */
 
 const API_URL = "http://127.0.0.1:8000/dashboard-data";
-const REFRESH_INTERVAL = 60000;
+const REFRESH_INTERVAL = 300000;
 
-// Set this to false only when you have configured and tested
-// your real authentication flow.
 const DEMO_MODE = true;
 
 let waterChart = null;

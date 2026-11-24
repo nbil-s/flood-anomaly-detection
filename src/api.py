@@ -1,4 +1,4 @@
-
+import time
 from collections import deque
 from pathlib import Path
 import json
@@ -46,6 +46,18 @@ app = FastAPI(
     description="Receives environmental readings and detects unusual patterns.",
     version="0.1.0",
 )
+
+# Dashboard cache
+DASHBOARD_CACHE_SECONDS = 600
+
+dashboard_cache = {
+    "data": None,
+    "expires_at": 0,
+}
+
+# Recent physical ESP32 readings (in-memory cache)
+physical_readings_cache = []
+MAX_PHYSICAL_READINGS = 240
 
 app.add_middleware(
     CORSMiddleware,
@@ -217,6 +229,23 @@ class SensorReading(BaseModel):
         return value.astimezone(timezone.utc)
 
 
+class PhysicalSensorReading(BaseModel):
+    timestamp: datetime
+    water_level_raw: int = Field(ge=0, le=4095)
+    rainfall_raw: int = Field(ge=0, le=4095)
+    temperature: float = Field(allow_inf_nan=False)
+    humidity: float = Field(ge=0, le=100, allow_inf_nan=False)
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+
+        return value.astimezone(timezone.utc)
+
+
+
 @app.get("/")
 def home():
     return {
@@ -238,17 +267,28 @@ def health():
 
 
 @app.get("/dashboard-data")
+
 def get_dashboard_data(
     limit: int = 240,
     current_user: dict = Depends(require_firebase_user),
 ):
-    """Return recent sensor readings and detected anomalies."""
+    """Return cached recent sensor readings and detected anomalies."""
 
     if limit < 1 or limit > 500:
         raise HTTPException(
             status_code=422,
             detail="Limit must be between 1 and 500.",
         )
+
+    now = time.time()
+    cached = dashboard_cache["data"]
+
+    if (
+        cached is not None
+        and now < dashboard_cache["expires_at"]
+        and cached["limit"] == limit
+    ):
+        return cached["response"]
 
     try:
         documents = (
@@ -274,13 +314,14 @@ def get_dashboard_data(
                 "timestamp": timestamp,
                 "water_level": data.get("water_level"),
                 "rainfall": data.get("rainfall"),
+                "water_level_raw": data.get("water_level_raw"),
+                "rainfall_raw": data.get("rainfall_raw"),
                 "temperature": data.get("temperature"),
                 "humidity": data.get("humidity"),
                 "data_source": data.get("data_source"),
                 "detection": detection,
             })
 
-        # Chronological order for dashboard charts.
         readings.reverse()
 
         anomaly_events = [
@@ -292,12 +333,22 @@ def get_dashboard_data(
 
         latest_reading = readings[-1] if readings else None
 
-        return {
+        response = {
             "readings": readings,
             "latest_reading": latest_reading,
             "anomaly_events": anomaly_events,
             "count": len(readings),
         }
+
+        dashboard_cache["data"] = {
+            "limit": limit,
+            "response": response,
+        }
+        dashboard_cache["expires_at"] = (
+            time.time() + DASHBOARD_CACHE_SECONDS
+        )
+
+        return response
 
     except HTTPException:
         raise
@@ -312,7 +363,6 @@ def get_dashboard_data(
             status_code=503,
             detail="Could not load dashboard data. Check the API terminal logs.",
         ) from exc
-
 
 @app.post("/readings")
 def receive_reading(reading: SensorReading):
@@ -478,3 +528,46 @@ def receive_reading(reading: SensorReading):
         detection_result["firebase_detection_saved"] = False
 
     return detection_result
+
+
+@app.post("/physical-readings")
+def receive_physical_reading(reading: PhysicalSensorReading):
+    values = reading.model_dump()
+
+    if not all(
+        math.isfinite(values[name])
+        for name in ("temperature", "humidity")
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Temperature and humidity must be finite numbers.",
+        )
+
+    try:
+        save_sensor_reading({
+            "timestamp": reading.timestamp.isoformat(),
+            "water_level_raw": values["water_level_raw"],
+            "rainfall_raw": values["rainfall_raw"],
+            "temperature": values["temperature"],
+            "humidity": values["humidity"],
+            "data_source": "esp32_physical_sensor",
+            "model_detection_status": "not_evaluated_uncalibrated",
+        })
+
+    except Exception as exc:
+        print(f"Firebase physical reading save error: {exc}")
+        traceback.print_exc()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Could not save physical sensor reading to Firebase.",
+        ) from exc
+
+    return {
+        "status": "received",
+        "message": "Physical sensor readings saved successfully.",
+        "timestamp": reading.timestamp.isoformat(),
+        "data_source": "esp32_physical_sensor",
+        "model_detection": "not_run_uncalibrated_sensor_values",
+        "firebase_saved": True,
+    }

@@ -50,3 +50,6 @@ results/historical_water_level_2024.png
 results/sambir_extreme_events_2024.png
 
 data/historical/
+
+# ESP32 Wi-Fi credentials
+hardware/esp32_flood_monitor/secrets.h
