@@ -1,94 +1,127 @@
 
 import argparse
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
+import pandas as pd
 import requests
 
 API_URL = "http://127.0.0.1:8000/readings"
-SAMPLING_INTERVAL_SECONDS = 30
-SEQUENCE_LENGTH = 24
+HEALTH_URL = "http://127.0.0.1:8000/health"
 
-# Each scenario contains exactly 24 readings.
-SCENARIOS = {
-    "normal": {
-        "water_level": [
-            30.5, 30.6, 30.5, 30.7, 30.6, 30.7,
-            30.6, 30.5, 30.7, 30.6, 30.5, 30.6,
-            30.5, 30.6, 30.7, 30.6, 30.5, 30.7,
-            30.6, 30.5, 30.6, 30.7, 30.6, 30.5,
-        ],
-        "rainfall": [0.0] * 24,
-    },
+DATASET_PATH = (
+    "experiments/improved_simulation_240/data/raw/"
+    "simulated_environmental_data.csv"
+)
 
-    "rising_water": {
-        "water_level": [
-            30.5, 30.6, 30.5, 30.7, 30.6, 30.7,
-            30.8, 31.0, 31.3, 31.6, 32.0, 32.5,
-            33.0, 33.5, 34.0, 34.5, 35.0, 35.5,
-            36.0, 36.5, 37.0, 37.5, 38.0, 39.0,
-        ],
-        "rainfall": [0.1] * 24,
-    },
+SEQUENCE_LENGTH = 240
+SAMPLING_INTERVAL_SECONDS = 60
 
-    "heavy_rain": {
-        "water_level": [
-            30.5, 30.5, 30.6, 30.6, 30.7, 30.8,
-            30.9, 31.0, 31.2, 31.4, 31.6, 31.8,
-            32.0, 32.3, 32.6, 33.0, 33.4, 33.8,
-            34.2, 34.6, 35.0, 35.5, 36.0, 36.5,
-        ],
-        "rainfall": [
-            0.1, 0.2, 0.2, 0.5, 1.0, 2.0,
-            3.0, 4.0, 5.0, 6.0, 8.0, 10.0,
-            11.0, 12.0, 13.0, 14.0, 15.0, 15.0,
-            14.0, 13.0, 12.0, 10.0, 8.0, 6.0,
-        ],
-    },
-
-    "sudden_spike": {
-        "water_level": [
-            30.5, 30.6, 30.5, 30.7, 30.6, 30.7,
-            30.6, 30.5, 30.7, 30.6, 30.5, 30.6,
-            30.5, 30.6, 30.7, 30.6, 30.5, 30.7,
-            30.6, 30.5, 30.6, 30.7, 30.6, 45.0,
-        ],
-        "rainfall": [0.1] * 24,
-    },
-}
+FEATURES = [
+    "water_level",
+    "rainfall",
+    "temperature",
+    "humidity",
+]
 
 
-def build_reading(scenario, index, start_time):
-    timestamp = start_time + timedelta(
-        seconds=SAMPLING_INTERVAL_SECONDS * index
+def load_baseline():
+    data = pd.read_csv(DATASET_PATH)
+
+    data["timestamp"] = pd.to_datetime(
+        data["timestamp"],
+        utc=True,
     )
 
-    return {
-        "timestamp": timestamp.isoformat(),
-        "water_level": scenario["water_level"][index],
-        "rainfall": scenario["rainfall"][index],
-        "temperature": 25.0,
-        "humidity": 68.0,
-    }
+    data = data.sort_values("timestamp").reset_index(drop=True)
+
+    if len(data) < SEQUENCE_LENGTH:
+        raise ValueError("Dataset contains fewer than 240 observations.")
+
+    if data[FEATURES].isna().any().any():
+        raise ValueError("Dataset contains missing sensor values.")
+
+    # Select a consecutive 240-reading window.
+    start = 1000
+    readings = data.iloc[start:start + SEQUENCE_LENGTH].copy()
+
+    if len(readings) != SEQUENCE_LENGTH:
+        raise ValueError("Could not obtain 240 consecutive readings.")
+
+    intervals = readings["timestamp"].diff().dropna()
+
+    if not (intervals.dt.total_seconds() == 60).all():
+        raise ValueError("Dataset readings are not exactly one minute apart.")
+
+    return readings.reset_index(drop=True)
+
+
+def apply_scenario(readings, scenario):
+    readings = readings.copy()
+
+    if scenario == "normal":
+        return readings
+
+    if scenario == "rising_water":
+        # Gradually increase water level during the final 60 readings.
+        start = 180
+        baseline = readings.loc[start, "water_level"]
+
+        for i in range(start, SEQUENCE_LENGTH):
+            progress = (i - start + 1) / 60
+            readings.loc[i, "water_level"] = (
+                baseline + 8.0 * progress
+            )
+
+            readings.loc[i, "rainfall"] = max(
+                readings.loc[i, "rainfall"],
+                0.15,
+            )
+
+    elif scenario == "heavy_rain":
+        for i in range(180, SEQUENCE_LENGTH):
+            progress = (i - 179) / 60
+
+            readings.loc[i, "rainfall"] = min(
+                0.15 + 1.5 * progress,
+                1.65,
+            )
+
+            readings.loc[i, "water_level"] += 4.0 * progress
+
+            readings.loc[i, "humidity"] = min(
+                readings.loc[i, "humidity"] + 3.0 * progress,
+                100.0,
+            )
+
+    elif scenario == "sudden_spike":
+        # Introduce one abrupt water-level increase.
+        readings.loc[SEQUENCE_LENGTH - 1, "water_level"] += 12.0
+
+    return readings
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Simulate environmental sensors for flood detection."
+        description="Simulate 240 environmental sensor readings."
     )
 
     parser.add_argument(
         "--scenario",
-        choices=SCENARIOS.keys(),
-        default="rising_water",
-        help="Sensor scenario to simulate.",
+        choices=[
+            "normal",
+            "rising_water",
+            "heavy_rain",
+            "sudden_spike",
+        ],
+        default="normal",
     )
 
     parser.add_argument(
         "--delay",
         type=float,
         default=0,
-        help="Seconds to wait between readings; 0 means accelerated mode.",
+        help="Delay between requests in seconds. Default: accelerated mode.",
     )
 
     args = parser.parse_args()
@@ -96,46 +129,51 @@ def main():
     if args.delay < 0:
         parser.error("--delay cannot be negative.")
 
-    if args.delay > 0 and args.delay < SAMPLING_INTERVAL_SECONDS:
-        parser.error(
-            "For real-time simulation, --delay must be at least 30 seconds."
-        )
+    if 0 < args.delay < SAMPLING_INTERVAL_SECONDS:
+        parser.error("--delay must be at least 60 seconds.")
 
-    # Check API availability.
     try:
-        health = requests.get(
-            "http://127.0.0.1:8000/health",
-            timeout=5,
-        )
-        health.raise_for_status()
+        health_response = requests.get(HEALTH_URL, timeout=5)
+        health_response.raise_for_status()
 
-        health_data = health.json()
-        print("API health:", health_data)
+        health = health_response.json()
+        print("API health:", health)
 
-        if health_data.get("readings_required") != SEQUENCE_LENGTH:
-            print(
-                f"ERROR: API requires "
-                f"{health_data.get('readings_required')} readings, "
-                f"but simulator is configured for {SEQUENCE_LENGTH}."
+        if health.get("status") != "ok":
+            raise RuntimeError("API is not healthy.")
+
+        if health.get("readings_required") != SEQUENCE_LENGTH:
+            raise RuntimeError(
+                "API and simulator sequence lengths do not match."
             )
-            print("Check that the API is using the correct model.")
-            return
 
-    except requests.RequestException as error:
-        print("Cannot reach FastAPI. Start the API first.")
-        print(error)
+        if health.get("buffered_readings") != 0:
+            raise RuntimeError(
+                "API buffer is not empty. Restart the API before "
+                "starting a new scenario."
+            )
+
+        readings = load_baseline()
+        readings = apply_scenario(readings, args.scenario)
+
+    except (requests.RequestException, ValueError, RuntimeError) as error:
+        print("Setup failed:", error)
         return
 
-    scenario = SCENARIOS[args.scenario]
-    start_time = datetime.now(timezone.utc)
-
     print(f"\nScenario: {args.scenario}")
-    print(f"Sending {SEQUENCE_LENGTH} readings...")
+    print(f"Readings: {SEQUENCE_LENGTH}")
     print(f"Sampling interval: {SAMPLING_INTERVAL_SECONDS} seconds")
-    print(f"Delay between requests: {args.delay} seconds\n")
+    print(f"Request delay: {args.delay} seconds")
+    print("\nSending readings...\n")
 
-    for index in range(SEQUENCE_LENGTH):
-        reading = build_reading(scenario, index, start_time)
+    for index, row in readings.iterrows():
+        reading = {
+            "timestamp": row["timestamp"].isoformat(),
+            "water_level": float(row["water_level"]),
+            "rainfall": float(row["rainfall"]),
+            "temperature": float(row["temperature"]),
+            "humidity": float(row["humidity"]),
+        }
 
         try:
             response = requests.post(
@@ -144,35 +182,37 @@ def main():
                 timeout=35,
             )
 
-            print(
-                f"Reading {index + 1}/{SEQUENCE_LENGTH} | "
-                f"Water level: {reading['water_level']:.1f} | "
-                f"Rainfall: {reading['rainfall']:.1f} | "
-                f"HTTP {response.status_code}"
-            )
-
             if not response.ok:
-                print("API error:", response.text)
+                print(f"Request failed at reading {index + 1}")
+                print(response.status_code, response.text)
                 return
 
             result = response.json()
 
+            print(
+                f"Reading {index + 1}/{SEQUENCE_LENGTH} | "
+                f"Water: {reading['water_level']:.2f} | "
+                f"Rain: {reading['rainfall']:.3f} | "
+                f"Status: {result.get('status')}"
+            )
+
             if index == SEQUENCE_LENGTH - 1:
-                print("\nDetection result")
-                print("----------------")
-                print("Status:", result.get("status"))
-                print(
-                    "Reconstruction error:",
-                    result.get("reconstruction_error"),
-                )
-                print("Threshold:", result.get("threshold"))
-                print(
-                    "Anomaly detected:",
-                    result.get("anomaly_detected"),
-                )
-                print("Interpretation:", result.get("interpretation"))
-            else:
-                print("Status:", result.get("status"))
+                print("\nFinal detection result")
+                print("----------------------")
+
+                for key in [
+                    "status",
+                    "anomaly_score",
+                    "reconstruction_error",
+                    "threshold",
+                    "triggering_feature",
+                    "anomaly_detected",
+                    "interpretation",
+                    "notification_sent",
+                    "firebase_detection_saved",
+                ]:
+                    if key in result:
+                        print(f"{key}: {result[key]}")
 
         except requests.RequestException as error:
             print("Request failed:", error)

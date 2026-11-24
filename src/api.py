@@ -24,10 +24,13 @@ from datetime import datetime, timezone, timedelta
 
 # Project paths
 ROOT_DIR = Path(__file__).resolve().parent.parent
-MODEL_PATH = ROOT_DIR / "models" / "lstm_autoencoder.pth"
-CONFIG_PATH = ROOT_DIR / "models" / "model_config.json"
-SCALER_PATH = ROOT_DIR / "models" / "scaler.joblib"
-THRESHOLD_PATH = ROOT_DIR / "models" / "threshold_config.json"
+
+MODEL_DIR = ROOT_DIR / "models" / "sequence_240"
+
+MODEL_PATH = MODEL_DIR / "lstm_autoencoder.pth"
+CONFIG_PATH = MODEL_DIR / "model_config.json"
+SCALER_PATH = MODEL_DIR / "scaler_compatible.joblib"
+SCORING_CONFIG_PATH = MODEL_DIR / "anomaly_scoring_config.json"
 
 FEATURES = [
     "water_level",
@@ -102,7 +105,7 @@ def load_artifacts():
         MODEL_PATH,
         CONFIG_PATH,
         SCALER_PATH,
-        THRESHOLD_PATH,
+        SCORING_CONFIG_PATH,
     ]
 
     missing = [str(path) for path in required_files if not path.exists()]
@@ -114,24 +117,48 @@ def load_artifacts():
     with CONFIG_PATH.open("r", encoding="utf-8") as file:
         config = json.load(file)
 
-    with THRESHOLD_PATH.open("r", encoding="utf-8") as file:
-        threshold_config = json.load(file)
+    with SCORING_CONFIG_PATH.open("r", encoding="utf-8") as file:
+        scoring_config = json.load(file)
 
     sequence_length = config.get("sequence_length")
 
     if not isinstance(sequence_length, int) or sequence_length <= 0:
         raise RuntimeError("Invalid sequence length in model configuration.")
 
-    if threshold_config.get("sequence_length") != sequence_length:
+    if scoring_config.get("sequence_length") != sequence_length:
         raise RuntimeError(
-            "The model and threshold configurations have different sequence lengths."
+            "Model and scoring configurations have different sequence lengths."
         )
 
     if config.get("input_features") != len(FEATURES):
         raise RuntimeError("Expected exactly four model input features.")
 
-    if threshold_config.get("features") != len(FEATURES):
-        raise RuntimeError("Expected exactly four threshold features.")
+    if scoring_config.get("feature_names") != FEATURES:
+        raise RuntimeError(
+            "Scoring feature names or their order do not match API features."
+        )
+
+    if scoring_config.get("scoring_method") != (
+        "maximum_normalized_feature_reconstruction_error"
+    ):
+        raise RuntimeError("Unsupported anomaly scoring method.")
+
+    reference_values = scoring_config.get(
+        "feature_reference_percentiles", {}
+    )
+
+    if any(
+        feature not in reference_values
+        or not math.isfinite(float(reference_values[feature]))
+        or float(reference_values[feature]) <= 0
+        for feature in FEATURES
+    ):
+        raise RuntimeError("Invalid feature reference percentile values.")
+
+    threshold = float(scoring_config["threshold"])
+
+    if not math.isfinite(threshold) or threshold <= 0:
+        raise RuntimeError("Invalid anomaly detection threshold.")
 
     model = LSTMAutoencoder(
         input_features=config["input_features"],
@@ -148,12 +175,28 @@ def load_artifacts():
     model.eval()
 
     scaler = joblib.load(SCALER_PATH)
-    threshold = float(threshold_config["threshold"])
 
-    return model, scaler, threshold, sequence_length
+    feature_reference_values = np.array(
+        [float(reference_values[feature]) for feature in FEATURES],
+        dtype=np.float32,
+    )
+
+    return (
+        model,
+        scaler,
+        threshold,
+        sequence_length,
+        feature_reference_values,
+    )
 
 
-model, scaler, threshold, sequence_length = load_artifacts()
+(
+    model,
+    scaler,
+    threshold,
+    sequence_length,
+    feature_reference_values,
+) = load_artifacts()
 
 reading_buffer = deque(maxlen=sequence_length)
 
@@ -340,13 +383,37 @@ def receive_reading(reading: SensorReading):
         dtype=torch.float32,
     ).unsqueeze(0).to(DEVICE)
 
+
     with torch.no_grad():
         reconstructed = model(input_tensor)
-        reconstruction_error = (
-            (input_tensor - reconstructed) ** 2
-        ).mean(dim=(1, 2)).item()
 
-    anomaly_detected = reconstruction_error > threshold
+        # Calculate reconstruction error separately for each feature.
+        feature_errors = (
+            (input_tensor - reconstructed) ** 2
+        ).mean(dim=1)
+
+        # Normalize errors using validation reference percentiles.
+        reference_tensor = torch.tensor(
+            feature_reference_values,
+            dtype=torch.float32,
+            device=DEVICE,
+        ).unsqueeze(0)
+
+        normalized_errors = feature_errors / reference_tensor
+
+        # Maximum normalized feature error.
+        anomaly_score = normalized_errors.max(dim=1).values.item()
+
+        triggering_feature_index = normalized_errors.argmax(
+            dim=1
+        ).item()
+
+        triggering_feature = FEATURES[triggering_feature_index]
+
+    anomaly_detected = anomaly_score > threshold
+
+    # Retain the previous field for dashboard compatibility.
+    reconstruction_error = anomaly_score
 
     detection_result = {
         "status": (
@@ -354,6 +421,11 @@ def receive_reading(reading: SensorReading):
         ),
         "timestamp": reading.timestamp.isoformat(),
         "reconstruction_error": round(reconstruction_error, 6),
+        "anomaly_score": round(anomaly_score, 6),
+        "scoring_method": (
+            "maximum_normalized_feature_reconstruction_error"
+        ),
+        "triggering_feature": triggering_feature,
         "threshold": round(threshold, 6),
         "anomaly_detected": anomaly_detected,
         "interpretation": (
@@ -365,22 +437,7 @@ def receive_reading(reading: SensorReading):
         "firebase_saved": True,
     }
 
-    # Save the detection result to the latest reading's document.
-    try:
-        sensor_doc_ref.update({
-            "detection": detection_result
-        })
-        detection_result["firebase_detection_saved"] = True
-
-    except Exception as exc:
-        print(
-            f"Firebase detection update error: {type(exc).__name__}: {exc}"
-        )
-        traceback.print_exc()
-        detection_result["firebase_detection_saved"] = False
-        
     # Send an email if an anomaly is detected and the cooldown has expired.
-
     notification_sent = False
 
     if anomaly_detected:
@@ -397,7 +454,7 @@ def receive_reading(reading: SensorReading):
                 timestamp=reading.timestamp.isoformat(),
                 water_level=values["water_level"],
                 rainfall=values["rainfall"],
-                reconstruction_error=round(reconstruction_error, 6),
+                reconstruction_error=round(anomaly_score, 6),
                 threshold=round(threshold, 6),
             )
 
@@ -406,13 +463,13 @@ def receive_reading(reading: SensorReading):
 
     detection_result["notification_sent"] = notification_sent
 
-    # Save detection and notification results to Firebase.
+    # Save the complete detection result once.
     try:
         sensor_doc_ref.update({
             "detection": detection_result
         })
         detection_result["firebase_detection_saved"] = True
-    
+
     except Exception as exc:
         print(
             f"Firebase detection update error: {type(exc).__name__}: {exc}"

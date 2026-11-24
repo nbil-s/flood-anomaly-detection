@@ -1,0 +1,20 @@
+{
+    "scoring_method": "maximum_normalized_feature_reconstruction_error",
+    "feature_names": [
+        "water_level",
+        "rainfall",
+        "temperature",
+        "humidity"
+    ],
+    "feature_reference_percentiles": {
+        "water_level": 0.2719452,
+        "rainfall": 1.7895211,
+        "temperature": 0.03032321,
+        "humidity": 0.13940372
+    },
+    "validation_error_percentile": 95,
+    "threshold": 1.6554215,
+    "sequence_length": 240,
+    "sampling_interval_seconds": 60,
+    "aggregation": "maximum"
+}

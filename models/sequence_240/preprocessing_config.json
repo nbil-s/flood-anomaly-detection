@@ -1,0 +1,63 @@
+{
+    "experiment": "improved_simulation_240",
+    "total_observations": 100000,
+    "sampling_interval_seconds": 60,
+    "features": [
+        "water_level",
+        "rainfall",
+        "temperature",
+        "humidity"
+    ],
+    "train_ratio": 0.7,
+    "validation_ratio": 0.15,
+    "test_ratio": 0.15000000000000005,
+    "sequence_lengths": [
+        60,
+        120,
+        240
+    ],
+    "scaler": "StandardScaler",
+    "scaler_fitted_on": "training_data_only",
+    "windowing": "separate_within_each_split",
+    "results": {
+        "60": {
+            "sequence_length": 60,
+            "window_duration_minutes": 59,
+            "training_windows": 69941,
+            "validation_windows": 14941,
+            "testing_windows": 14941,
+            "features": [
+                "water_level",
+                "rainfall",
+                "temperature",
+                "humidity"
+            ]
+        },
+        "120": {
+            "sequence_length": 120,
+            "window_duration_minutes": 119,
+            "training_windows": 69881,
+            "validation_windows": 14881,
+            "testing_windows": 14881,
+            "features": [
+                "water_level",
+                "rainfall",
+                "temperature",
+                "humidity"
+            ]
+        },
+        "240": {
+            "sequence_length": 240,
+            "window_duration_minutes": 239,
+            "training_windows": 69761,
+            "validation_windows": 14761,
+            "testing_windows": 14761,
+            "features": [
+                "water_level",
+                "rainfall",
+                "temperature",
+                "humidity"
+            ]
+        }
+    }
+}
