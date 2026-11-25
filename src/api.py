@@ -64,6 +64,7 @@ app.add_middleware(
     allow_origins=[
         "http://127.0.0.1:5500",
         "http://localhost:5500",
+        "https://flood-anomaly-dashboard.onrender.com",
     ],
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
@@ -83,10 +84,6 @@ bearer_scheme = HTTPBearer(auto_error=False)
 def require_firebase_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
 ):
-    """
-    Verify the Firebase ID token supplied by the dashboard.
-    Reject requests without a valid token.
-    """
 
     if credentials is None:
         raise HTTPException(
@@ -272,7 +269,6 @@ def get_dashboard_data(
     limit: int = 240,
     current_user: dict = Depends(require_firebase_user),
 ):
-    """Return cached recent sensor readings and detected anomalies."""
 
     if limit < 1 or limit > 500:
         raise HTTPException(

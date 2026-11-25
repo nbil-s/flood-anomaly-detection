@@ -31,7 +31,7 @@ const googleProvider = new GoogleAuthProvider();
    FLOODSENSE — DASHBOARD APPLICATION
    ========================================================= */
 
-const API_URL = "http://127.0.0.1:8000/dashboard-data";
+const API_URL = "https://flood-anomaly-api.onrender.com/dashboard-data";
 const REFRESH_INTERVAL = 300000;
 
 const DEMO_MODE = true;
