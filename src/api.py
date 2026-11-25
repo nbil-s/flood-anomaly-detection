@@ -519,6 +519,8 @@ def receive_reading(reading: SensorReading):
                         reconstruction_error=round(anomaly_score, 6),
                         threshold=round(threshold, 6),
                         recipients=recipients,
+                        temperature=values["temperature"],
+                        humidity=values["humidity"],
                     )
 
                     if notification_sent:
