@@ -487,7 +487,7 @@ def receive_reading(reading: SensorReading):
         "firebase_saved": True,
     }
 
-    # Send an email if an anomaly is detected and the cooldown has expired.
+    # Send alerts to users who have enabled email notifications.
     notification_sent = False
 
     if anomaly_detected:
@@ -500,18 +500,46 @@ def receive_reading(reading: SensorReading):
         )
 
         if cooldown_expired:
-            notification_sent = send_anomaly_email(
-                timestamp=reading.timestamp.isoformat(),
-                water_level=values["water_level"],
-                rainfall=values["rainfall"],
-                reconstruction_error=round(anomaly_score, 6),
-                threshold=round(threshold, 6),
-            )
+            try:
+                subscriber_documents = (
+                    db.collection("users")
+                    .where("notificationsEnabled", "==", True)
+                    .stream()
+                )
 
-            if notification_sent:
-                last_email_alert_at = now
+                recipients = [
+                    document.to_dict().get("email", "").strip()
+                    for document in subscriber_documents
+                    if document.to_dict().get("email")
+                ]
+
+                recipients = list(dict.fromkeys(recipients))
+
+                if recipients:
+                    notification_sent = send_anomaly_email(
+                        timestamp=reading.timestamp.isoformat(),
+                        water_level=values["water_level"],
+                        rainfall=values["rainfall"],
+                        reconstruction_error=round(anomaly_score, 6),
+                        threshold=round(threshold, 6),
+                        recipients=recipients,
+                    )
+
+                    if notification_sent:
+                        last_email_alert_at = now
+
+                else:
+                    print("No users have subscribed to flood alerts.")
+
+            except Exception as exc:
+                print(
+                    "Subscriber notification error: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                traceback.print_exc()
 
     detection_result["notification_sent"] = notification_sent
+
 
     # Save the complete detection result once.
     try:

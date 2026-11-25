@@ -14,12 +14,21 @@ import {
 
 import { firebaseConfig } from "./firebase-config.js";
 
+import {
+    getFirestore,
+    doc,
+    getDoc,
+    setDoc,
+    serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
+const firestore = getFirestore(firebaseApp);
 const googleProvider = new GoogleAuthProvider();
 
 /* =========================================================
-   FLOODWATCH — DASHBOARD APPLICATION
+   FLOODSENSE — DASHBOARD APPLICATION
    ========================================================= */
 
 const API_URL = "http://127.0.0.1:8000/dashboard-data";
@@ -109,11 +118,21 @@ function getReadingValue(reading, key) {
     }
 
     const aliases = {
-        water_level: ["water_level", "waterLevel", "waterlevel"],
-        rainfall: ["rainfall", "rain", "rainfall_level"],
-        temperature: ["temperature", "temp"],
-        humidity: ["humidity", "relative_humidity"]
-    };
+    water_level: [
+        "water_level",
+        "water_level_raw",
+        "waterLevel",
+        "waterlevel"
+    ],
+    rainfall: [
+        "rainfall",
+        "rainfall_raw",
+        "rain",
+        "rainfall_level"
+    ],
+    temperature: ["temperature", "temp"],
+    humidity: ["humidity", "relative_humidity"]
+};
 
     for (const candidate of aliases[key] ?? [key]) {
         if (
@@ -158,6 +177,102 @@ async function handleSignOut() {
     }
 }
 
+
+async function loadNotificationPreferences(user) {
+    const toggle = element("notificationToggle");
+    const status = element("notificationStatus");
+
+    if (!toggle || !user) return;
+
+    toggle.disabled = true;
+    status.textContent = "Loading preferences...";
+
+    try {
+        const userRef = doc(firestore, "users", user.uid);
+        const userSnapshot = await getDoc(userRef);
+
+        let notificationsEnabled = false;
+
+        if (userSnapshot.exists()) {
+            const userData = userSnapshot.data();
+
+            notificationsEnabled =
+                userData.notificationsEnabled === true;
+
+            await setDoc(userRef, {
+                email: user.email || "",
+                displayName: user.displayName || "",
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+
+        } else {
+            await setDoc(userRef, {
+                uid: user.uid,
+                email: user.email || "",
+                displayName: user.displayName || "",
+                notificationsEnabled: false,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp()
+            });
+        }
+
+        toggle.checked = notificationsEnabled;
+        toggle.disabled = false;
+
+        status.textContent = notificationsEnabled
+            ? "Alerts are enabled"
+            : "Alerts are disabled";
+
+        if (!toggle.dataset.listenerAttached) {
+    toggle.addEventListener("change", async () => {
+        const currentUser = auth.currentUser;
+
+        if (!currentUser) {
+            toggle.checked = false;
+            return;
+        }
+
+        toggle.disabled = true;
+        const newValue = toggle.checked;
+
+        try {
+            await setDoc(
+                doc(firestore, "users", currentUser.uid),
+                {
+                    uid: currentUser.uid,
+                    notificationsEnabled: newValue,
+                    updatedAt: serverTimestamp()
+                },
+                { merge: true }
+            );
+
+            status.textContent = newValue
+                ? "Alerts are enabled"
+                : "Alerts are disabled";
+
+        } catch (error) {
+            console.error(
+                "Could not update notification preference:",
+                error
+            );
+
+            toggle.checked = !newValue;
+            status.textContent = "Could not save preference.";
+        }
+
+        toggle.disabled = false;
+    });
+
+    toggle.dataset.listenerAttached = "true";
+}
+
+    } catch (error) {
+        console.error("Could not load notification preferences:", error);
+        status.textContent = "Could not load preferences";
+        toggle.disabled = true;
+    }
+}
+
 function handleAuthentication(user) {
     const isSignedIn = Boolean(user);
 
@@ -176,6 +291,8 @@ function handleAuthentication(user) {
     }
 
     updateViewerProfile(user);
+
+    loadNotificationPreferences(user);
 
     initializeTheme();
     initCharts();
